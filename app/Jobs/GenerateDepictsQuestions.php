@@ -34,6 +34,10 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
          */
         public $timeout = 300;
 
+        public int $tries = 5;
+
+        public array $backoff = [10, 30, 60, 300];
+
         const DEPICTS_PROPERTY = 'P180';
         const WIKIDATA = 'www.wikidata.org';
         const COMMONS = 'commons.wikimedia.org';
@@ -118,6 +122,20 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
         public function uniqueFor(): int
         {
             return 3600; // 1 hour - longer than individual job timeout
+        }
+
+        /**
+         * Handle a permanently failed job (after $tries is exhausted).
+         */
+        public function failed(\Throwable $exception)
+        {
+            \Log::error("GenerateDepictsQuestions permanently failed", [
+                'category' => $this->category,
+                'depictItemId' => $this->depictItemId,
+                'depictName' => $this->depictName,
+                'recursionDepth' => $this->recursionDepth,
+                'exception' => $exception->getMessage(),
+            ]);
         }
 
         /**
