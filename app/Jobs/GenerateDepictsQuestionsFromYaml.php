@@ -10,12 +10,19 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Symfony\Component\Yaml\Yaml;
 use App\Jobs\GenerateDepictsQuestions;
 
 class GenerateDepictsQuestionsFromYaml implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 5;
+
+    public array $backoff = [10, 30, 60, 300];
+
+    public int $timeout = 300;
 
     private $depictItemId;
     private $yamlUrl;
@@ -53,6 +60,18 @@ class GenerateDepictsQuestionsFromYaml implements ShouldQueue, ShouldBeUnique
         return 600; // 10 minutes
     }
 
+    /**
+     * Handle a permanently failed job (after $tries is exhausted).
+     */
+    public function failed(\Throwable $exception)
+    {
+        \Log::error("GenerateDepictsQuestionsFromYaml permanently failed", [
+            'depictItemId' => $this->depictItemId,
+            'yamlUrl' => $this->yamlUrl,
+            'exception' => $exception->getMessage(),
+        ]);
+    }
+
     public function handle()
     {
         \Log::info("Starting GenerateDepictsQuestionsFromYaml job with depictItemId: {$this->depictItemId} and extra yamlUrl: {$this->yamlUrl}");
@@ -69,10 +88,12 @@ class GenerateDepictsQuestionsFromYaml implements ShouldQueue, ShouldBeUnique
         try {
 
         $defaultYamlUrl = 'https://commons.wikimedia.org/wiki/User:Addshore/wikicrowd.yaml?action=raw';
-        $yamlContent = @file_get_contents($defaultYamlUrl);
-        if ($yamlContent === false) {
-            \Log::error("Failed to download YAML from $defaultYamlUrl");
-            return;
+        try {
+            $yamlContent = Http::timeout(10)->get($defaultYamlUrl)->throw()->body();
+        } catch (\Throwable $e) {
+            \Log::error("Failed to download YAML from $defaultYamlUrl: " . $e->getMessage());
+            $lock->release();
+            throw $e;
         }
         $parsed = Yaml::parse($yamlContent, Yaml::PARSE_OBJECT_FOR_MAP);
         if (!is_object($parsed) || !isset($parsed->questions) || !isset($parsed->global)) {
@@ -81,10 +102,12 @@ class GenerateDepictsQuestionsFromYaml implements ShouldQueue, ShouldBeUnique
         }
         // If an override YAML URL is provided, fetch and merge (override) it
         if ($this->yamlUrl !== null && $this->yamlUrl !== '') {
-            $overrideContent = @file_get_contents($this->yamlUrl);
-            if ($overrideContent === false) {
-                \Log::error("Failed to download override YAML from {$this->yamlUrl}");
-                return;
+            try {
+                $overrideContent = Http::timeout(10)->get($this->yamlUrl)->throw()->body();
+            } catch (\Throwable $e) {
+                \Log::error("Failed to download override YAML from {$this->yamlUrl}: " . $e->getMessage());
+                $lock->release();
+                throw $e;
             }
             $overrideParsed = Yaml::parse($overrideContent, Yaml::PARSE_OBJECT_FOR_MAP);
             if (is_object($overrideParsed)) {
