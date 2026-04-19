@@ -16,6 +16,12 @@ class ValidateQuestions implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 5;
+
+    public array $backoff = [10, 30, 60, 300];
+
+    public int $timeout = 300;
+
     private $questionIds;
     private $reason;
 
@@ -71,6 +77,20 @@ class ValidateQuestions implements ShouldQueue
             'reason' => $this->reason,
             'processed' => count($this->questionIds),
             'deleted' => $deletedCount
+        ]);
+    }
+
+    /**
+     * Handle a permanently failed job (after $tries is exhausted).
+     *
+     * @return void
+     */
+    public function failed(\Throwable $exception)
+    {
+        Log::error("ValidateQuestions permanently failed", [
+            'reason' => $this->reason,
+            'question_count' => count($this->questionIds),
+            'exception' => $exception->getMessage(),
         ]);
     }
 
@@ -136,7 +156,7 @@ class ValidateQuestions implements ShouldQueue
         try {
             // Check if the media item exists on Commons
             $url = "https://commons.wikimedia.org/w/api.php";
-            $response = Http::withOptions(['allow_redirects' => true])->get($url, [
+            $response = Http::timeout(10)->withOptions(['allow_redirects' => true])->get($url, [
                 'action' => 'wbgetentities',
                 'ids' => $mediaInfoId,
                 'format' => 'json',
@@ -161,7 +181,7 @@ class ValidateQuestions implements ShouldQueue
     {
         try {
             $url = "https://commons.wikimedia.org/w/api.php";
-            $response = Http::withOptions(['allow_redirects' => true])->get($url, [
+            $response = Http::timeout(10)->withOptions(['allow_redirects' => true])->get($url, [
                 'action' => 'wbgetclaims',
                 'entity' => $mediaInfoId,
                 'property' => 'P180', // depicts property
