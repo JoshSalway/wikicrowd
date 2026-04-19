@@ -14,6 +14,10 @@ class RemoveUnansweredQuestions implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 3;
+
+    public int $timeout = 120;
+
     private $groupName;
 
     public function __construct(
@@ -32,6 +36,17 @@ class RemoveUnansweredQuestions implements ShouldQueue
         }
         $c = Question::where('question_group_id', '=', $qg->id)->doesntHave('answer')->doesntHave('edit')->delete();
         echo "Deleted $c questions\n";
+    }
+
+    /**
+     * Handle a permanently failed job (after $tries is exhausted).
+     */
+    public function failed(\Throwable $exception)
+    {
+        \Log::error("RemoveUnansweredQuestions permanently failed", [
+            'groupName' => $this->groupName,
+            'exception' => $exception->getMessage(),
+        ]);
     }
 
 }
